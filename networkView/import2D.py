@@ -63,7 +63,7 @@ def datasetImportConv(dataset_path,dataset,dataset_object,dimension,typeOfSet,de
 
     pathTo=dataset_path+'/'+dataset+'/'+dataset_object+'/'+dimension+'/'+typeOfSet
     dict=importData(pathTo)
-    [data,labels]=[dict['data'],dict['label']]
+    [data,labels]=[dict['data'],dict['labels']]
     if depth==True:
         dataTensor=np.zeros([len(data),2,data[0].shape[1],data[0].shape[2]],np.float32)
     else:

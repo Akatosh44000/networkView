@@ -10,6 +10,7 @@ import sys
 import batch_functions
 from pandas.util.testing import network
 import threading
+import euler
 
 sys.setrecursionlimit(50000)
       
@@ -20,7 +21,9 @@ class Network():
         self.dimChannels=dimChannels
         self.dimFeatures=dimFeatures
         self.dimOutput=dimOutput
-        
+        self.loss=0
+        self._observers = []
+
         input_var = T.tensor4('inputs')
         target_var = T.matrix('targets')
         learning_rate=T.scalar('learning rate')
@@ -53,16 +56,31 @@ class Network():
         self.f_accuracy=theano.function([input_var,target_var],test_loss)
         self.f_export_params=theano.function([],params)
         
-    def createTrainingThread(self,train_data,train_labels,valid_data,valid_labels):
-        self.trainingThread = threading.Thread(None, self.trainThread, None,(),{'name':'coucou'})
+    def createTrainingThread(self,train_data,train_labels,valid_data,valid_labels,trigger):
+        self.trainingThread = threading.Thread(None, self.trainNetwork, None,(),
+                                               {'train_data':train_data,
+                                                'train_labels':train_labels,
+                                                'valid_data':valid_data,
+                                                'valid_labels':valid_labels,
+                                                'trigger':trigger})
     
     def trainThread(self,name):
         print('test Thread',name)
+    
+    def set_loss(self, value):
+        self._loss = value
+        for callback in self._observers:
+            callback(self._loss)
             
-    def trainNetwork(self,train_data,train_labels,valid_data,valid_labels,batchSize=20,epochs=100,learningRate=0.001,penalty=0.001):
+    def bind_to(self, callback):
+        self._observers.append(callback)
+                
+    def trainNetwork(self,train_data,train_labels,valid_data,valid_labels,trigger,batchSize=20,epochs=100,learningRate=0.001,penalty=0.001):
+        
         epoch_kept=0
         min_valid_error=10000
         valid_data=batch_functions.normalize_batch(valid_data)
+        
         for e in range(0,epochs):
             train_err = 0
             train_batches = 0
@@ -79,23 +97,47 @@ class Network():
                 min_valid_error=valid_error
                 epoch_kept=e
                 params=lasagne.layers.get_all_param_values(self.last_layer)
-                
+                #self.exportNetwork()
+            self.set_loss(train_err)
             print("EPOCH : "+str(e)+'    LOSS: '+str(train_err)+'    ERROR: '+str(valid_error)+'    RATE: '+str(learningRate))
         print('END - EPOCH KEPT : '+str(epoch_kept))   
         return Network(self.dimChannels,self.dimFeatures,self.dimOutput,self.name,paramsImport=params)
-
+    
+    def getParamsValues(self):
+        return lasagne.layers.get_all_param_values(self.last_layer)
+    
     def predict(self,test_data):
         batch_functions.normalize_batch(test_data)
         return self.f_predict(test_data)
     
     def testNetwork(self,test_data,test_labels):
         test_data=batch_functions.normalize_batch(test_data)
-        return self.f_accuracy(test_data,test_labels)
-    
-    def exportNetwork(self):
-        #Export de la classe en un fichier
-        import pickle
-        f=open(self.name+'.dat','wb')
-        pickle.dump(self,f)
-        f.close()
+        prediction=self.f_predict(test_data)
+        #print(test_labels,prediction)
+        
+        moy=0
+        for i in range(prediction.shape[0]):
+            q=[test_labels[i,0],test_labels[i,1],test_labels[i,2],test_labels[i,3]]
+            anglesR=np.array(euler.quat2euler(prediction[i,:]))
+            anglesV=np.array(euler.quat2euler(q))
+            for j in range(3):
+                anglesR[j]=anglesR[j]*180/np.pi
+                if anglesR[j]<0:
+                    anglesR[j]=anglesR[j]+360.0
+                anglesV[j]=anglesV[j]*180/np.pi
+                if anglesV[j]<0:
+                    anglesV[j]=anglesV[j]+360.0
+            #print(anglesR,anglesV)
+            anglesD=[]
+            for j in range(3):
+                angle = np.abs(anglesR[j] - anglesV[j]) % 360;  
+                if angle > 180 :
+                    anglesD.append(360-angle)
+                else: 
+                    anglesD.append(angle)
+            #print(anglesD)
+            moy+=np.mean(anglesD)
+        moy/=prediction.shape[0]
+        return moy
+                
         
